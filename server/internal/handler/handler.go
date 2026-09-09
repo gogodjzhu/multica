@@ -135,6 +135,8 @@ type Config struct {
 	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
 	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
 	//   - LLMMaxRetries    -> MULTICA_LLM_MAX_RETRIES (transport retry budget)
+	//   - LLMDisableThinking -> MULTICA_LLM_DISABLE_THINKING (gateway hint to
+	//     turn model reasoning off; see llm.Config.DisableThinking)
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
@@ -144,6 +146,10 @@ type Config struct {
 	// and cmd/server additionally fails the boot on an out-of-range value before
 	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
 	LLMMaxRetries *llm.RetryOverride
+	// LLMDisableThinking is the parsed MULTICA_LLM_DISABLE_THINKING switch.
+	// cmd/server validates the raw value before the boot continues, so a
+	// non-boolean never reaches this struct.
+	LLMDisableThinking bool
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -437,23 +443,27 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	llmClient := llm.New(llm.Config{
-		APIKey:       cfg.LLMAPIKey,
-		BaseURL:      cfg.LLMBaseURL,
-		DefaultModel: cfg.LLMDefaultModel,
-		MaxRetries:   cfg.LLMMaxRetries,
+		APIKey:          cfg.LLMAPIKey,
+		BaseURL:         cfg.LLMBaseURL,
+		DefaultModel:    cfg.LLMDefaultModel,
+		MaxRetries:      cfg.LLMMaxRetries,
+		DisableThinking: cfg.LLMDisableThinking,
 	})
 	// Report the effective retry policy so an operator can confirm from the
 	// boot log alone what a misbehaving upstream will cost, instead of inferring
 	// it from an env var whose semantics used to be unguessable (MUL-6364).
 	// Read off the client, not off cfg, so the line cannot drift from what the
 	// SDK actually enforces. Counts and an enum only — never the key or the base
-	// URL, since a self-hosted gateway URL routinely embeds a token.
+	// URL, since a self-hosted gateway URL routinely embeds a token. The
+	// disable_thinking field rides along so the effective request shape is on
+	// the same line.
 	llmRetry := llmClient.RetryBudget()
 	slog.Info("llm retry policy",
 		"max_retries", llmRetry.MaxRetries,
 		"source", llmRetry.Source,
 		"request_timeout", llmRetry.RequestTimeout,
 		"enabled", llmClient.Enabled(),
+		"disable_thinking", llmClient.DisableThinking(),
 	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
