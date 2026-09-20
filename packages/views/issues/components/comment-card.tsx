@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -128,6 +128,8 @@ interface CommentCardProps {
   onCreateSubIssue?: (commentId: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  /** Copy a deep link (`#comment-…`) to a single comment in this thread. */
+  onCopyLink?: (commentId: string) => void;
   /**
    * When non-null, the thread root is currently rendered as a resolved-but-
    * expanded card. Pass a "Collapse" affordance into the header so the user
@@ -618,6 +620,7 @@ function CommentRow({
   onToggleReaction,
   onCreateSubIssue,
   onResolveToggle,
+  onCopyLink,
 }: {
   runHeader?: ReactNode;
   runMetadata?: ReactNode;
@@ -636,6 +639,7 @@ function CommentRow({
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  onCopyLink?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -732,6 +736,12 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {onCopyLink && (
+                <DropdownMenuItem onClick={() => onCopyLink(entry.id)}>
+                  <Link2 className="h-3.5 w-3.5" />
+                  {t(($) => $.comment.copy_link_action)}
+                </DropdownMenuItem>
+              )}
               {onCreateSubIssue && entry.comment_type === "comment" && (
                 <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
                   <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
@@ -957,6 +967,7 @@ function CommentCardImpl({
   onToggleReaction,
   onCreateSubIssue,
   onResolveToggle,
+  onCopyLink,
   onCollapseResolved,
   expandedResolvedIds,
   onResolvedExpandChange,
@@ -1012,7 +1023,7 @@ function CommentCardImpl({
       const reply = run.hasReply ? allNestedReplies.find((entry) => entry.id === run.commentId) : undefined;
       return <Fragment key={run.task.id}><AgentRunComment run={run} entering={enteringRunIds?.has(run.task.id)} commentProps={reply ? {
         issueId, entry: reply, replies: [], currentUserId, canModerate, onReply, onEdit, onDelete,
-        onToggleReaction, onCreateSubIssue, onResolveToggle, highlightedCommentId, enteringRunIds,
+        onToggleReaction, onCreateSubIssue, onResolveToggle, onCopyLink, highlightedCommentId, enteringRunIds,
       } : undefined} />{reply && reply.id !== commentId && renderAnchoredRuns(reply.id)}</Fragment>;
     });
 
@@ -1174,6 +1185,12 @@ function CommentCardImpl({
                         <Copy className="h-3.5 w-3.5" />
                         {t(($) => $.comment.copy_action)}
                       </DropdownMenuItem>
+                      {onCopyLink && (
+                        <DropdownMenuItem onClick={() => onCopyLink(entry.id)}>
+                          <Link2 className="h-3.5 w-3.5" />
+                          {t(($) => $.comment.copy_link_action)}
+                        </DropdownMenuItem>
+                      )}
                       {onCreateSubIssue && entry.comment_type === "comment" && (
                         <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
                           <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
@@ -1384,6 +1401,7 @@ function CommentCardImpl({
                       onToggleReaction={onToggleReaction}
                       onCreateSubIssue={onCreateSubIssue}
                       onResolveToggle={onResolveToggle}
+                      onCopyLink={onCopyLink}
                     />
                   </div>
                   {renderAnchoredRuns(resolutionReply.id)}
@@ -1432,6 +1450,7 @@ function CommentCardImpl({
                         onToggleReaction={onToggleReaction}
                         onCreateSubIssue={onCreateSubIssue}
                         onResolveToggle={onResolveToggle}
+                        onCopyLink={onCopyLink}
                       />
                     </div>
                   )}

@@ -28,6 +28,7 @@ export interface UseIssueActionsResult {
   openInNewTab: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
+  copyCommentLink: (commentId: string) => Promise<void>;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
   removeParent: () => void;
@@ -168,6 +169,20 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     }
   }, [paths, issueId, issueIdentifier, navigation, t]);
 
+  const copyCommentLink = useCallback(async (commentId: string) => {
+    if (!issueId) return;
+    // The `#comment-…` fragment is the deep-link anchor `IssueDetailRoute`
+    // resolves via `parseCommentHighlightHash`; dropping it would downgrade the
+    // link to the whole issue. Share the identifier form for the same reason
+    // `copyLink` does.
+    const url = `${navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId))}#comment-${commentId}`;
+    if (await copyText(url)) {
+      toast.success(t(($) => $.comment.link_copied));
+    } else {
+      toast.error(t(($) => $.comment.link_copy_failed));
+    }
+  }, [paths, issueId, issueIdentifier, navigation, t]);
+
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
     openModal("create-issue", {
@@ -266,6 +281,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openInNewTab,
     togglePin,
     copyLink,
+    copyCommentLink,
     openCreateSubIssue,
     openSetParent,
     removeParent,
