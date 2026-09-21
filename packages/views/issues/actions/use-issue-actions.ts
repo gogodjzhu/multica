@@ -169,19 +169,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     }
   }, [paths, issueId, issueIdentifier, navigation, t]);
 
+  // Built during render so `copyCommentLink` depends on this string alone:
+  // `paths` is rebuilt on every render, and the handler is passed to every
+  // memoized comment card, so depending on it would re-render all of them on
+  // any unrelated page update. Identifier form for the same reason as `copyLink`.
+  const issueShareUrl = issueId
+    ? navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId))
+    : null;
   const copyCommentLink = useCallback(async (commentId: string) => {
-    if (!issueId) return;
+    if (!issueShareUrl) return;
     // The `#comment-…` fragment is the deep-link anchor `IssueDetailRoute`
     // resolves via `parseCommentHighlightHash`; dropping it would downgrade the
-    // link to the whole issue. Share the identifier form for the same reason
-    // `copyLink` does.
-    const url = `${navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId))}#comment-${commentId}`;
+    // link to the whole issue.
+    const url = `${issueShareUrl}#comment-${commentId}`;
     if (await copyText(url)) {
       toast.success(t(($) => $.comment.link_copied));
     } else {
       toast.error(t(($) => $.comment.link_copy_failed));
     }
-  }, [paths, issueId, issueIdentifier, navigation, t]);
+  }, [issueShareUrl, t]);
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;

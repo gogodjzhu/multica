@@ -22,6 +22,9 @@ const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
 const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+// Every ReadonlyContent render, by content. A comment card renders its body
+// through it, so this counts card renders without reaching into the card.
+const readonlyContentRenders = vi.hoisted(() => [] as string[]);
 const descriptionSelectionAction = vi.hoisted(() => ({ current: undefined as { label: string; onSelect: () => void } | undefined }));
 // Stable empty-attachments reference: the real store returns a shared constant
 // so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
@@ -167,9 +170,10 @@ vi.mock("../../editor", async () => ({
   ImageSequenceProvider: ({ children }: { children: React.ReactNode }) =>
     children,
   isPreviewable: () => false,
-  ReadonlyContent: ({ content }: { content: string }) => (
-    <div data-testid="readonly-content">{content}</div>
-  ),
+  ReadonlyContent: ({ content }: { content: string }) => {
+    readonlyContentRenders.push(content);
+    return <div data-testid="readonly-content">{content}</div>;
+  },
   ContentEditor: forwardRef(function MockContentEditor(
     {
       defaultValue,
@@ -676,6 +680,7 @@ describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     contentEditorMounts.count = 0;
+    readonlyContentRenders.length = 0;
     descriptionSelectionAction.current = undefined;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
@@ -1543,6 +1548,24 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
+  });
+
+  // Comment cards are memoized so page state that has nothing to do with the
+  // timeline does not re-render every comment on a long issue. Any handler the
+  // page hands to the cards must keep its identity across such renders.
+  it("does not re-render comment cards when unrelated page state changes", async () => {
+    renderIssueDetail();
+    await screen.findByText("I can help with this");
+    await screen.findByText("Details");
+
+    const commentBodies = new Set(mockTimeline.map((entry) => entry.content));
+    const cardRenders = () =>
+      readonlyContentRenders.filter((content) => commentBodies.has(content)).length;
+    const before = cardRenders();
+
+    fireEvent.click(screen.getByText("Details"));
+
+    expect(cardRenders()).toBe(before);
   });
 
   it("prefers timeline identity when the actor is absent from the member directory", async () => {
