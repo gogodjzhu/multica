@@ -1,4 +1,24 @@
 {
+  "side_question": {
+    "title": "Question annexe",
+    "question": "Question",
+    "character_count": "{{count}} / {{max}}",
+    "placeholder": "Posez une question sur cette conversation…",
+    "notice": "Une question rapide, sans interrompre la conversation principale",
+    "ask": "Demander",
+    "retry": "Réessayer",
+    "refresh": "Actualiser l’état",
+    "close": "Fermer et annuler",
+    "pending": "En attente…",
+    "running": "Réponse en cours…",
+    "busy": "Une autre question annexe est en cours pour cette conversation ou cet environnement. Attendez sa fin.",
+    "unavailable": "Cet agent est indisponible. Vérifiez son environnement et vos autorisations, puis réessayez.",
+    "failed": "Impossible de répondre. Réessayez.",
+    "timeout": "Le délai a expiré. Réessayez.",
+    "cancelled": "Question annexe annulée.",
+    "status_error": "Impossible de récupérer le résultat. Actualisez l’état.",
+    "cancel_error": "Annulation non confirmée. L’exécution expirera automatiquement sous 10 minutes."
+  },
   "page": {
     "title": "Discussion",
     "select_prompt": "Choisissez une conversation, ou démarrez-en une nouvelle avec +",

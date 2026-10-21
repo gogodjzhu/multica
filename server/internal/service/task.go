@@ -2334,6 +2334,20 @@ func (s *TaskService) SendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 ) (*DirectChatSendResult, error) {
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil)
+}
+
+func (s *TaskService) sendDirectChatMessage(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	attachmentIDs []pgtype.UUID,
+	uploaderType string,
+	uploaderID pgtype.UUID,
+	source *db.ChatSession,
+) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
@@ -2352,6 +2366,13 @@ func (s *TaskService) SendDirectChatMessage(
 
 	var out DirectChatSendResult
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if source != nil {
+			created, err := s.createSideQuestionSessionTx(ctx, qtx, *source, session.ID, initiatorUserID)
+			if err != nil {
+				return err
+			}
+			session = created
+		}
 		// Serialise this send against a concurrent runtime rebind of the same
 		// session (MUL-5163). The lock must be taken first and the agent re-read
 		// under it: the runtime_id the caller loaded can already be stale by the
@@ -2417,6 +2438,12 @@ func (s *TaskService) SendDirectChatMessage(
 		task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("stamp direct chat input owner: %w", err)
+		}
+		if session.Purpose == "side_question" {
+			task, err = qtx.MarkSideQuestionTask(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("mark side question task: %w", err)
+			}
 		}
 		out.Task = task
 
@@ -3487,6 +3514,9 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 }
 
 func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.AgentTaskQueue, payload protocol.ChatCancelFinalizedPayload) {
+	if IsSideQuestionTask(task) {
+		return
+	}
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
 		return
@@ -4613,7 +4643,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	// cursor (chat_session.last_read_at) vs the assistant messages after it — a
 	// no_response row has role='assistant' and a fresh created_at, so it counts
 	// as unread just like a text reply, no per-reply stamping needed.
-	if task.ChatSessionID.Valid {
+	if task.ChatSessionID.Valid && !IsSideQuestionTask(task) {
 		// The assistant outcome row (message / no_response) and any attachment
 		// binding were written inside the completion transaction above by
 		// writeChatCompletionOutcome. Broadcast chat:done AFTER commit.
@@ -5418,6 +5448,7 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		!IsTriageTask(t) &&
+		!IsSideQuestionTask(t) &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
 }
 
@@ -7258,6 +7289,9 @@ func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID str
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {
+	if IsSideQuestionTask(task) {
+		return
+	}
 	var payload map[string]any
 	if task.Context != nil {
 		json.Unmarshal(task.Context, &payload)
@@ -7322,7 +7356,7 @@ func taskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...m
 }
 
 func (s *TaskService) publishTaskEvent(eventType, workspaceID string, task db.AgentTaskQueue, extra ...map[string]any) {
-	if workspaceID == "" {
+	if workspaceID == "" || IsSideQuestionTask(task) {
 		return
 	}
 	s.Bus.Publish(taskEvent(eventType, workspaceID, task, extra...))

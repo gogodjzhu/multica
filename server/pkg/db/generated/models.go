@@ -563,6 +563,8 @@ type ChatSession struct {
 	PinnedAt            pgtype.Timestamptz `json:"pinned_at"`
 	ProjectID           pgtype.UUID        `json:"project_id"`
 	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
+	Purpose             string             `json:"purpose"`
+	SourceSessionID     pgtype.UUID        `json:"source_session_id"`
 }
 
 type ClientUsageDaily struct {

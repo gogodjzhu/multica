@@ -329,6 +329,7 @@ export function ChatPage() {
       />
 
       <ChatInput
+        sideQuestion
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}

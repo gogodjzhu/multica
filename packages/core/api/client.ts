@@ -103,6 +103,7 @@ import type {
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
+  ChatSideQuestion,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
   CancelTaskResponse,
@@ -270,6 +271,7 @@ import {
   ChatSessionListSchema,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
+  ChatSideQuestionSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
   ChildIssuesResponseSchema,
@@ -3850,6 +3852,37 @@ export class ApiClient {
       }
       throw err;
     }
+  }
+
+  async askChatSideQuestion(sessionId: string, content: string, workspaceSlug: string): Promise<ChatSideQuestion> {
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/side-question`, {
+      method: "POST",
+      headers: workspaceHeader(workspaceSlug),
+      body: JSON.stringify({ content }),
+    });
+    const response = parseWithFallback<ChatSideQuestion | null>(raw, ChatSideQuestionSchema, null, {
+      endpoint: "POST /api/chat/sessions/:id/side-question",
+    });
+    if (!response) throw new Error("invalid side question response");
+    return response;
+  }
+
+  async getChatSideQuestion(sessionId: string, requestId: string, workspaceSlug: string): Promise<ChatSideQuestion> {
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/side-question/${requestId}`, {
+      headers: workspaceHeader(workspaceSlug),
+    });
+    const response = parseWithFallback<ChatSideQuestion | null>(raw, ChatSideQuestionSchema, null, {
+      endpoint: "GET /api/chat/sessions/:id/side-question/:requestId",
+    });
+    if (!response || response.id !== requestId) throw new Error("invalid side question response");
+    return response;
+  }
+
+  async cancelChatSideQuestion(sessionId: string, requestId: string, workspaceSlug: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/side-question/${requestId}`, {
+      method: "DELETE",
+      headers: workspaceHeader(workspaceSlug),
+    });
   }
 
   async sendChatMessage(

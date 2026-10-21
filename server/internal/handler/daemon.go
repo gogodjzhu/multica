@@ -4343,7 +4343,9 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.TaskService.ReportProgress(r.Context(), taskID, workspaceID, req.Summary, req.Step, req.Total)
+	if !service.IsSideQuestionTask(task) {
+		h.TaskService.ReportProgress(r.Context(), taskID, workspaceID, req.Summary, req.Step, req.Total)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -5329,7 +5331,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if workspaceID != "" {
+	if workspaceID != "" && !service.IsSideQuestionTask(task) {
 		// CreateTaskMessages orders its result by seq, which is the daemon's
 		// own within-batch ordering — so this publishes in the same order the
 		// per-message loop did. A bare INSERT ... RETURNING has no row-order

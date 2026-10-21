@@ -951,6 +951,7 @@ export function ChatWindow() {
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        sideQuestion
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         conversationStarterRequest={conversationStarterRequest}

@@ -133,6 +133,7 @@ interface ContentEditorBaseProps {
    */
   onUpdate?: (markdown: string, baseMarkdown: string) => void;
   placeholder?: string;
+  ariaLabel?: string;
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
@@ -366,6 +367,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       value,
       onUpdate,
       placeholder: placeholderText = "",
+      ariaLabel,
       className,
       debounceMs = 300,
       onSubmit,
@@ -686,6 +688,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-body outline-none", className),
+          ...(ariaLabel ? { role: "textbox", "aria-label": ariaLabel, "aria-multiline": "true" } : {}),
         },
       },
     });

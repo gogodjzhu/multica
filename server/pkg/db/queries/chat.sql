@@ -28,6 +28,7 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT cs.* FROM chat_session AS cs
 WHERE cs.id = $1
   AND cs.workspace_id = $2
+  AND cs.purpose = 'chat'
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -62,6 +63,7 @@ LEFT JOIN LATERAL (
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+  AND cs.purpose = 'chat'
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -99,6 +101,7 @@ LEFT JOIN LATERAL (
    LIMIT 1
 ) lm ON true
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND cs.purpose = 'chat'
   AND (
     cs.explicitly_created_at IS NOT NULL
     OR
@@ -1466,6 +1469,7 @@ WHERE atq.chat_session_id IS NOT NULL
   -- turn and must not surface as "running" chat work (MUL-5149 refresh follow-up).
   AND atq.regenerate_quick_actions_for IS NULL
   AND cs.workspace_id = $1
+  AND cs.purpose = 'chat'
   AND cs.creator_id = $2
 ORDER BY atq.created_at DESC;
 
@@ -1489,6 +1493,7 @@ SELECT EXISTS (
     -- never light the FAB "running" indicator (MUL-5149 refresh follow-up).
     AND atq.regenerate_quick_actions_for IS NULL
     AND cs.workspace_id = sqlc.arg(workspace_id)
+    AND cs.purpose = 'chat'
     AND cs.creator_id = sqlc.arg(creator_id)
     AND cs.agent_id = ANY(sqlc.arg(agent_ids)::uuid[])
 ) AS has_pending;

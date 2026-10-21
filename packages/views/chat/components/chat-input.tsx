@@ -20,6 +20,7 @@ import {
 } from "../../editor/use-coordinated-uploads";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
+import { ChatSideQuestion } from "./chat-side-question";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
@@ -146,6 +147,7 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
+  sideQuestion?: boolean;
 }
 
 export function ChatInput({
@@ -174,6 +176,7 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
+  sideQuestion,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
@@ -756,6 +759,11 @@ export function ChatInput({
             )}
             {leftAdornment}
           </div>
+        )}
+        {sideQuestion && activeSessionId && (
+          <ChatSideQuestion key={activeSessionId} sessionId={activeSessionId}
+            disabled={!!disabled || !!noAgent}
+            readDraft={() => editorRef.current?.getMarkdown() ?? inputDraft} />
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton

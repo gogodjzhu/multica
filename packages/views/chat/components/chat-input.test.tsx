@@ -2,6 +2,7 @@ import { cloneElement, forwardRef, useEffect, useRef, useImperativeHandle } from
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { DraftUpload } from "@multica/core/drafts";
 import enCommon from "../../locales/en/common.json";
@@ -26,8 +27,21 @@ const insertMarkdownSpy = vi.hoisted(() => vi.fn());
 // the same or the two records drift apart only in tests.
 let mockUploadIdSeq = 0;
 
-vi.mock("@multica/core/api", () => ({
-  api: { uploadFile: mockApiUploadFile },
+const sideApi = vi.hoisted(() => ({
+  askChatSideQuestion: vi.fn(), getChatSideQuestion: vi.fn(), cancelChatSideQuestion: vi.fn(),
+}));
+const sideWorkspace = vi.hoisted(() => ({ id: "ws-1", slug: "original-workspace" }));
+vi.mock("@multica/core/hooks", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/hooks")>(),
+  useWorkspaceId: () => sideWorkspace.id,
+}));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/paths")>(),
+  useRequiredWorkspaceSlug: () => sideWorkspace.slug,
+}));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@multica/core/api")>(),
+  api: { uploadFile: mockApiUploadFile, ...sideApi },
 }));
 
 function makeUpload(overrides: Partial<UploadResult> & { id: string; link: string; filename: string }): UploadResult {
@@ -94,6 +108,8 @@ vi.mock("../../editor", async () => ({
       value?: string;
       onUpdate?: (md: string) => void;
       placeholder?: string;
+      ariaLabel?: string;
+      onSubmit?: () => void;
       onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
       onUploadingChange?: (uploading: boolean) => void;
       mentionMode?: string;
@@ -178,9 +194,13 @@ vi.mock("../../editor", async () => ({
     }));
     return (
       <textarea
-        data-testid="editor"
+        data-testid={props.ariaLabel ? "side-question-editor" : "editor"}
+        aria-label={props.ariaLabel}
         defaultValue={value ?? defaultValue}
         placeholder={placeholder}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && event.ctrlKey) props.onSubmit?.();
+        }}
         onChange={(e) => {
           valueRef.current = e.target.value;
           onUpdate?.(e.target.value);
@@ -381,6 +401,106 @@ function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
     </I18nProvider>
   );
 }
+
+describe("ChatInput side questions", () => {
+  const id = "019a0100-0000-7000-8000-000000000001";
+  beforeEach(() => {
+    sideWorkspace.id = "ws-1";
+    sideWorkspace.slug = "original-workspace";
+    sideApi.askChatSideQuestion.mockReset().mockResolvedValue({ id, status: "pending" });
+    sideApi.getChatSideQuestion.mockReset().mockResolvedValue({ id, status: "pending" });
+    sideApi.cancelChatSideQuestion.mockReset().mockResolvedValue(undefined);
+    useChatStore.getState().activeSessionId = "source";
+  });
+  function mount() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(element({ sideQuestion: true, isRunning: true }), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+  }
+  function open() {
+    fireEvent.click(screen.getByRole("button", { name: "Side question" }));
+  }
+  it("renders above the actual composer, copies its live draft and keeps the main run untouched", async () => {
+    const view = mount();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "Main draft question" } });
+    open();
+    const question = screen.getByRole("textbox", { name: "Question" });
+    expect(question).toHaveValue("Main draft question");
+    expect(question.closest("section")?.parentElement).toHaveAttribute("data-slot", "chat-input-surface");
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(sideApi.askChatSideQuestion).toHaveBeenCalledWith("source", "Main draft question", "original-workspace"));
+    expect(screen.getByTestId("editor")).toHaveValue("Main draft question");
+    expect(editorState.cleared).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Close and cancel" }));
+    await waitFor(() => expect(sideApi.cancelChatSideQuestion).toHaveBeenCalledWith("source", id, "original-workspace"));
+    expect(screen.queryByRole("textbox", { name: "Question" })).not.toBeInTheDocument();
+    view.unmount();
+  });
+  it("submits through the shared editor and closes with Escape while keeping the main draft", async () => {
+    mount();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "Main draft" } });
+    open();
+    const question = screen.getByRole("textbox", { name: "Question" });
+    fireEvent.change(question, { target: { value: "Quick question?" } });
+    fireEvent.keyDown(question, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(sideApi.askChatSideQuestion).toHaveBeenCalledWith("source", "Quick question?", "original-workspace"));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Close and cancel" }), { key: "Escape" });
+    await waitFor(() => expect(sideApi.cancelChatSideQuestion).toHaveBeenCalledWith("source", id, "original-workspace"));
+    expect(screen.queryByRole("region", { name: "Side question" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("editor")).toHaveValue("Main draft");
+    expect(editorState.cleared).toBe(0);
+  });
+  it("cancels a POST that resolves after the panel closes", async () => {
+    let resolve!: (value: { id: string; status: string }) => void;
+    sideApi.askChatSideQuestion.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    mount();
+    open();
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Question?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(sideApi.askChatSideQuestion).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Close and cancel" }));
+    await act(async () => resolve({ id, status: "pending" }));
+    await waitFor(() => expect(sideApi.cancelChatSideQuestion).toHaveBeenCalledWith("source", id, "original-workspace"));
+    expect(sideApi.getChatSideQuestion).not.toHaveBeenCalled();
+  });
+  it.each(["session", "workspace", "unmount"])("cancels on %s change and ignores stale results", async (change) => {
+    let resolve!: (value: { id: string; status: string; answer: string }) => void;
+    sideApi.getChatSideQuestion.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const view = mount();
+    open();
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Question?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(sideApi.getChatSideQuestion).toHaveBeenCalledTimes(1));
+    if (change === "unmount") view.unmount();
+    else {
+      if (change === "session") useChatStore.getState().activeSessionId = "other-source";
+      else { sideWorkspace.id = "ws-2"; sideWorkspace.slug = "other-workspace"; }
+      view.rerender(element({ sideQuestion: true }));
+    }
+    await waitFor(() => expect(sideApi.cancelChatSideQuestion).toHaveBeenCalledWith("source", id, "original-workspace"));
+    await act(async () => resolve({ id, status: "completed", answer: "Stale answer" }));
+    expect(screen.queryByText("Stale answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Question" })).not.toBeInTheDocument();
+  });
+  it("renders a terminal answer as Markdown and stops polling", async () => {
+    sideApi.getChatSideQuestion.mockResolvedValue({
+      id, status: "completed",
+      answer: "# Final answer\n\nUse **saved context** and `git status`.\n\n- Keep working\n- Ask separately\n\n| Item | Status |\n| --- | --- |\n| Main chat | Running |",
+    });
+    mount();
+    open();
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "Question?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(await screen.findByRole("heading", { name: "Final answer" })).toBeInTheDocument();
+    expect(screen.getByText("saved context").tagName).toBe("STRONG");
+    expect(screen.getByText("git status").tagName).toBe("CODE");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 1700));
+    expect(sideApi.getChatSideQuestion).toHaveBeenCalledTimes(1);
+  });
+});
 
 // MUL-4864: an uncreated chat has ONE draft per workspace. `selectedAgentId`
 // picks where the first send goes; it does not own the draft. Switching agent

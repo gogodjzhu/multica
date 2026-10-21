@@ -74,6 +74,20 @@ export function isTaskMessageTaskId(taskId: string | null | undefined): taskId i
   return typeof taskId === "string" && UUID_PATTERN.test(taskId);
 }
 
+export function chatSideQuestionOptions(wsId: string, workspaceSlug: string, sessionId: string, requestId: string) {
+  return queryOptions({
+    queryKey: [...chatKeys.all(wsId), "side-question", sessionId, requestId],
+    queryFn: () => api.getChatSideQuestion(sessionId, requestId, workspaceSlug),
+    enabled: !!requestId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return !status || status === "pending" || status === "running" ? 1500 : false;
+    },
+    retry: 1,
+    gcTime: 0,
+  });
+}
+
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),

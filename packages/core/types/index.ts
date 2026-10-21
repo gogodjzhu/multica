@@ -183,6 +183,8 @@ export type {
   PendingChatTaskItem,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
+  ChatSideQuestion,
+  ChatSideQuestionStatus,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
   CancelledChatMessage,

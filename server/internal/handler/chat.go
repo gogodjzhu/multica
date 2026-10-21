@@ -262,7 +262,7 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 		ID:          sessionUUID,
 		WorkspaceID: workspaceUUID,
 	})
-	if err != nil {
+	if err != nil || session.Purpose != "chat" {
 		writeError(w, http.StatusNotFound, "chat session not found")
 		return db.ChatSession{}, false
 	}

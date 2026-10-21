@@ -23,6 +23,7 @@ import type {
   ChatPendingTask,
   ChatSession,
   PrioritizeQueuedChatTaskResponse,
+  ChatSideQuestion,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
   Comment,
@@ -2237,6 +2238,18 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
+
+export const ChatSideQuestionSchema: z.ZodType<ChatSideQuestion> = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["pending", "running", "completed", "failed", "cancelled", "timeout"])
+    .catch("failed"),
+  answer: z.string().optional(),
+  error: z.string().optional(),
+}).loose().transform((response) =>
+  response.status === "completed" && !response.answer?.trim()
+    ? { ...response, status: "failed" as const, answer: undefined }
+    : response,
+);
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string().min(1),

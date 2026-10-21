@@ -186,6 +186,16 @@ export interface ChatMessagesPage {
   next_cursor?: ChatMessagesCursor | null;
 }
 
+export type ChatSideQuestionStatus =
+  | "pending" | "running" | "completed" | "failed" | "cancelled" | "timeout";
+
+export interface ChatSideQuestion {
+  id: string;
+  status: ChatSideQuestionStatus;
+  answer?: string;
+  error?: string;
+}
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
