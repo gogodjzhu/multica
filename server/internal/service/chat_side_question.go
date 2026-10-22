@@ -37,7 +37,10 @@ func (s *TaskService) EnqueueChatSideQuestion(ctx context.Context, source db.Cha
 		return nil, errors.New("side questions require database transactions")
 	}
 	session := db.ChatSession{ID: dbid.NewV7(), AgentID: source.AgentID, WorkspaceID: source.WorkspaceID, CreatorID: userID}
-	return s.sendDirectChatMessage(ctx, session, agent, userID, prompt, nil, actorType, actorID, &source)
+	return s.sendDirectChatMessage(ctx, session, agent, userID, prompt, nil, actorType, actorID,
+		func(ctx context.Context, q *db.Queries) (db.ChatSession, error) {
+			return s.createSideQuestionSessionTx(ctx, q, source, session.ID, userID)
+		})
 }
 
 func (s *TaskService) createSideQuestionSessionTx(ctx context.Context, q *db.Queries, source db.ChatSession, id, userID pgtype.UUID) (db.ChatSession, error) {
@@ -54,9 +57,19 @@ func (s *TaskService) createSideQuestionSessionTx(ctx context.Context, q *db.Que
 	if current.Status != "active" {
 		return db.ChatSession{}, ErrChatSessionArchived
 	}
-	agent, err := q.GetAgentForClaimUpdate(ctx, current.AgentID)
+	return createSideQuestionForAgentTx(ctx, q, db.CreateSideQuestionChatSessionParams{
+		ID: id, WorkspaceID: source.WorkspaceID, AgentID: current.AgentID, CreatorID: userID,
+		SourceSessionID: source.ID,
+	})
+}
+
+func createSideQuestionForAgentTx(ctx context.Context, q *db.Queries, session db.CreateSideQuestionChatSessionParams) (db.ChatSession, error) {
+	agent, err := q.GetAgentForClaimUpdate(ctx, session.AgentID)
 	if err != nil {
 		return db.ChatSession{}, err
+	}
+	if agent.WorkspaceID != session.WorkspaceID {
+		return db.ChatSession{}, pgx.ErrNoRows
 	}
 	if agent.ArchivedAt.Valid {
 		return db.ChatSession{}, ErrChatTaskAgentArchived
@@ -74,17 +87,17 @@ func (s *TaskService) createSideQuestionSessionTx(ctx context.Context, q *db.Que
 	if runtime.Status != "online" {
 		return db.ChatSession{}, ErrSideQuestionUnavailable
 	}
-	busy, err := q.HasPendingSideQuestion(ctx, db.HasPendingSideQuestionParams{SourceSessionID: source.ID, RuntimeID: agent.RuntimeID})
+	busy, err := q.HasPendingSideQuestion(ctx, db.HasPendingSideQuestionParams{
+		WorkspaceID: session.WorkspaceID, SourceSessionID: session.SourceSessionID, SourceIssueID: session.SourceIssueID, RuntimeID: agent.RuntimeID,
+	})
 	if err != nil {
 		return db.ChatSession{}, err
 	}
 	if busy {
 		return db.ChatSession{}, ErrSideQuestionBusy
 	}
-	return q.CreateSideQuestionChatSession(ctx, db.CreateSideQuestionChatSessionParams{
-		ID: id, WorkspaceID: source.WorkspaceID, AgentID: current.AgentID, CreatorID: userID,
-		RuntimeID: agent.RuntimeID, SourceSessionID: source.ID,
-	})
+	session.RuntimeID = agent.RuntimeID
+	return q.CreateSideQuestionChatSession(ctx, session)
 }
 
 // SweepChatSideQuestions cancels overdue runs before retiring their result sessions.

@@ -565,6 +565,7 @@ type ChatSession struct {
 	ExplicitlyCreatedAt pgtype.Timestamptz `json:"explicitly_created_at"`
 	Purpose             string             `json:"purpose"`
 	SourceSessionID     pgtype.UUID        `json:"source_session_id"`
+	SourceIssueID       pgtype.UUID        `json:"source_issue_id"`
 }
 
 type ClientUsageDaily struct {

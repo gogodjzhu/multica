@@ -12,9 +12,9 @@ import (
 )
 
 const createSideQuestionChatSession = `-- name: CreateSideQuestionChatSession :one
-INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title, runtime_id, purpose, source_session_id)
-VALUES ($1, $2, $3, $4, 'Side question', $5, 'side_question', $6)
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, purpose, source_session_id
+INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title, runtime_id, purpose, source_session_id, source_issue_id)
+VALUES ($1, $2, $3, $4, 'Side question', $5, 'side_question', $6, $7)
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, purpose, source_session_id, source_issue_id
 `
 
 type CreateSideQuestionChatSessionParams struct {
@@ -24,6 +24,7 @@ type CreateSideQuestionChatSessionParams struct {
 	CreatorID       pgtype.UUID `json:"creator_id"`
 	RuntimeID       pgtype.UUID `json:"runtime_id"`
 	SourceSessionID pgtype.UUID `json:"source_session_id"`
+	SourceIssueID   pgtype.UUID `json:"source_issue_id"`
 }
 
 func (q *Queries) CreateSideQuestionChatSession(ctx context.Context, arg CreateSideQuestionChatSessionParams) (ChatSession, error) {
@@ -34,6 +35,7 @@ func (q *Queries) CreateSideQuestionChatSession(ctx context.Context, arg CreateS
 		arg.CreatorID,
 		arg.RuntimeID,
 		arg.SourceSessionID,
+		arg.SourceIssueID,
 	)
 	var i ChatSession
 	err := row.Scan(
@@ -56,6 +58,7 @@ func (q *Queries) CreateSideQuestionChatSession(ctx context.Context, arg CreateS
 		&i.ExplicitlyCreatedAt,
 		&i.Purpose,
 		&i.SourceSessionID,
+		&i.SourceIssueID,
 	)
 	return i, err
 }
@@ -70,19 +73,20 @@ func (q *Queries) DeleteSideQuestionMessages(ctx context.Context, chatSessionID 
 }
 
 const getSideQuestionChatSession = `-- name: GetSideQuestionChatSession :one
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at, cs.purpose, cs.source_session_id FROM chat_session cs
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at, cs.purpose, cs.source_session_id, cs.source_issue_id FROM chat_session cs
 JOIN agent_task_queue task ON task.chat_session_id = cs.id
 WHERE task.id = $1
   AND cs.workspace_id = $2
   AND cs.purpose = 'side_question'
-  AND cs.source_session_id = $3
-  AND cs.creator_id = $4
+  AND (cs.source_session_id = $3 OR cs.source_issue_id = $4)
+  AND cs.creator_id = $5
 `
 
 type GetSideQuestionChatSessionParams struct {
 	TaskID          pgtype.UUID `json:"task_id"`
 	WorkspaceID     pgtype.UUID `json:"workspace_id"`
 	SourceSessionID pgtype.UUID `json:"source_session_id"`
+	SourceIssueID   pgtype.UUID `json:"source_issue_id"`
 	CreatorID       pgtype.UUID `json:"creator_id"`
 }
 
@@ -91,6 +95,7 @@ func (q *Queries) GetSideQuestionChatSession(ctx context.Context, arg GetSideQue
 		arg.TaskID,
 		arg.WorkspaceID,
 		arg.SourceSessionID,
+		arg.SourceIssueID,
 		arg.CreatorID,
 	)
 	var i ChatSession
@@ -114,6 +119,7 @@ func (q *Queries) GetSideQuestionChatSession(ctx context.Context, arg GetSideQue
 		&i.ExplicitlyCreatedAt,
 		&i.Purpose,
 		&i.SourceSessionID,
+		&i.SourceIssueID,
 	)
 	return i, err
 }
@@ -122,32 +128,121 @@ const hasPendingSideQuestion = `-- name: HasPendingSideQuestion :one
 SELECT EXISTS (
     SELECT 1 FROM chat_session cs
     JOIN agent_task_queue task ON task.chat_session_id = cs.id
-    WHERE cs.purpose = 'side_question'
-      AND (cs.source_session_id = $1 OR task.runtime_id = $2)
+    WHERE cs.purpose = 'side_question' AND cs.workspace_id = $1
+      AND (cs.source_session_id = $2 OR cs.source_issue_id = $3 OR task.runtime_id = $4)
       AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 ) AS pending
 `
 
 type HasPendingSideQuestionParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
 	SourceSessionID pgtype.UUID `json:"source_session_id"`
+	SourceIssueID   pgtype.UUID `json:"source_issue_id"`
 	RuntimeID       pgtype.UUID `json:"runtime_id"`
 }
 
 func (q *Queries) HasPendingSideQuestion(ctx context.Context, arg HasPendingSideQuestionParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasPendingSideQuestion, arg.SourceSessionID, arg.RuntimeID)
+	row := q.db.QueryRow(ctx, hasPendingSideQuestion,
+		arg.WorkspaceID,
+		arg.SourceSessionID,
+		arg.SourceIssueID,
+		arg.RuntimeID,
+	)
 	var pending bool
 	err := row.Scan(&pending)
 	return pending, err
 }
 
+const listIssueSideQuestionComments = `-- name: ListIssueSideQuestionComments :many
+SELECT author_type, left(content, 1501)::text AS content FROM comment
+WHERE issue_id = $1 AND workspace_id = $2
+  AND deleted_at IS NULL AND type = 'comment' AND btrim(content) <> ''
+ORDER BY created_at DESC, id DESC
+LIMIT 12
+`
+
+type ListIssueSideQuestionCommentsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListIssueSideQuestionCommentsRow struct {
+	AuthorType string `json:"author_type"`
+	Content    string `json:"content"`
+}
+
+func (q *Queries) ListIssueSideQuestionComments(ctx context.Context, arg ListIssueSideQuestionCommentsParams) ([]ListIssueSideQuestionCommentsRow, error) {
+	rows, err := q.db.Query(ctx, listIssueSideQuestionComments, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueSideQuestionCommentsRow{}
+	for rows.Next() {
+		var i ListIssueSideQuestionCommentsRow
+		if err := rows.Scan(&i.AuthorType, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueSideQuestionMessages = `-- name: ListIssueSideQuestionMessages :many
+SELECT message.type, left(message.content, 1501)::text AS content FROM task_message message
+JOIN agent_task_queue task ON task.id = message.task_id
+JOIN issue source ON source.id = task.issue_id
+WHERE task.issue_id = $1 AND source.workspace_id = $2 AND task.agent_id = $3
+  AND message.type = 'text' AND btrim(message.content) <> ''
+ORDER BY task.created_at DESC, task.id DESC, message.seq DESC
+LIMIT 12
+`
+
+type ListIssueSideQuestionMessagesParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+type ListIssueSideQuestionMessagesRow struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
+func (q *Queries) ListIssueSideQuestionMessages(ctx context.Context, arg ListIssueSideQuestionMessagesParams) ([]ListIssueSideQuestionMessagesRow, error) {
+	rows, err := q.db.Query(ctx, listIssueSideQuestionMessages, arg.IssueID, arg.WorkspaceID, arg.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueSideQuestionMessagesRow{}
+	for rows.Next() {
+		var i ListIssueSideQuestionMessagesRow
+		if err := rows.Scan(&i.Type, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSideQuestionSweepCandidates = `-- name: ListSideQuestionSweepCandidates :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at, cs.purpose, cs.source_session_id FROM chat_session cs
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at, cs.project_id, cs.explicitly_created_at, cs.purpose, cs.source_session_id, cs.source_issue_id FROM chat_session cs
 WHERE cs.purpose = 'side_question'
   AND (
     (EXISTS (SELECT 1 FROM agent_task_queue task WHERE task.chat_session_id = cs.id
              AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred'))
      AND (cs.created_at < now() - make_interval(secs => $1::double precision)
-          OR NOT EXISTS (SELECT 1 FROM chat_session source WHERE source.id = cs.source_session_id)))
+          OR (cs.source_session_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1 FROM chat_session source WHERE source.id = cs.source_session_id AND source.workspace_id = cs.workspace_id))
+          OR (cs.source_issue_id IS NOT NULL AND NOT EXISTS (
+              SELECT 1 FROM issue source WHERE source.id = cs.source_issue_id AND source.workspace_id = cs.workspace_id))))
     OR
     (NOT EXISTS (SELECT 1 FROM agent_task_queue task WHERE task.chat_session_id = cs.id
                  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred'))
@@ -193,6 +288,7 @@ func (q *Queries) ListSideQuestionSweepCandidates(ctx context.Context, arg ListS
 			&i.ExplicitlyCreatedAt,
 			&i.Purpose,
 			&i.SourceSessionID,
+			&i.SourceIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -205,7 +301,7 @@ func (q *Queries) ListSideQuestionSweepCandidates(ctx context.Context, arg ListS
 }
 
 const listSideQuestionTasks = `-- name: ListSideQuestionTasks :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step FROM agent_task_queue
 WHERE chat_session_id = $1
 ORDER BY created_at
 `
@@ -279,6 +375,7 @@ func (q *Queries) ListSideQuestionTasks(ctx context.Context, chatSessionID pgtyp
 			&i.CancelledByID,
 			&i.CancelledByName,
 			&i.IssueSnapshot,
+			&i.WorkflowStep,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +400,7 @@ const markSideQuestionTask = `-- name: MarkSideQuestionTask :one
 UPDATE agent_task_queue
 SET context = jsonb_build_object('purpose', 'side_question'), quick_actions_disabled = true
 WHERE id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 func (q *Queries) MarkSideQuestionTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
@@ -369,6 +466,7 @@ func (q *Queries) MarkSideQuestionTask(ctx context.Context, id pgtype.UUID) (Age
 		&i.CancelledByID,
 		&i.CancelledByName,
 		&i.IssueSnapshot,
+		&i.WorkflowStep,
 	)
 	return i, err
 }

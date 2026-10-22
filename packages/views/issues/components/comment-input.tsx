@@ -6,7 +6,9 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay,
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
-import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
+import { MessageCircleQuestion } from "lucide-react";
+import { contentReferencesAttachment, type AgentTask, type Issue } from "@multica/core/types";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
@@ -20,10 +22,12 @@ import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
 import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
+import { SideQuestion } from "../../common/side-question";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
   issueId: string;
+  sideQuestionAssignee?: Pick<Issue, "assignee_type" | "assignee_id">;
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
@@ -39,8 +43,11 @@ function steerTopLevelByDefault(task: AgentTask): boolean {
   return !task.trigger_comment_id;
 }
 
-function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: CommentInputProps) {
+function CommentInput({ issueId, sideQuestionAssignee, onSubmit, onAccepted, onEditAnnotation }: CommentInputProps) {
   const { t } = useT("issues");
+  const { t: tChat } = useT("chat");
+  const canAskSideQuestion = !!sideQuestionAssignee?.assignee_id &&
+    (sideQuestionAssignee.assignee_type === "agent" || sideQuestionAssignee.assignee_type === "squad");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -222,7 +229,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   return (
     <div
       {...dropZoneProps}
-      className="relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border"
+      className="relative flex flex-col rounded-lg bg-card ring-1 ring-border"
     >
       {attachmentsBlockSteer && <div className="px-3 pt-2">
         <SteerAttachmentNotice />
@@ -300,7 +307,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           </div>
         </div>
       )}
-      <div className="absolute bottom-1 left-2 right-28 min-w-0">
+      <div className="absolute bottom-1 left-2 right-36 min-w-0">
         <CommentTriggerChips
           recipients={recipients}
           blocked={triggerPreview.blocked}
@@ -309,7 +316,24 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           onActionChange={setAction}
         />
       </div>
-      <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+      <div className="flex items-center justify-end gap-1 px-1.5 pb-1">
+        {canAskSideQuestion ? (
+          <SideQuestion key={`${sideQuestionAssignee?.assignee_type}:${sideQuestionAssignee?.assignee_id}`}
+            source="issue" sourceId={issueId}
+            readDraft={() => editorRef.current?.getMarkdown() ?? persistedDraft ?? content} />
+        ) : (
+          <Tooltip>
+            <TooltipTrigger render={<span tabIndex={0} className="inline-flex cursor-not-allowed rounded-md"
+              aria-label={tChat(($) => $.side_question.assignee_required)} />}>
+              <Button type="button" variant="ghost" size="icon-sm" disabled
+                className="border border-dashed border-border text-muted-foreground"
+                aria-label={tChat(($) => $.side_question.title)}>
+                <MessageCircleQuestion />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{tChat(($) => $.side_question.assignee_required)}</TooltipContent>
+          </Tooltip>
+        )}
         <FileUploadButton
           size="sm"
           multiple

@@ -21,6 +21,20 @@ import type {
 import { ALL_STATUSES } from "./config";
 import { issueColumnCategory } from "./status-category";
 
+export function issueSideQuestionOptions(wsId: string, workspaceSlug: string, issueId: string, requestId: string) {
+  return queryOptions({
+    queryKey: [...issueKeys.all(wsId), "side-question", issueId, requestId],
+    queryFn: () => api.getIssueSideQuestion(issueId, requestId, workspaceSlug),
+    enabled: !!requestId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return !status || status === "pending" || status === "running" ? 1500 : false;
+    },
+    retry: 1,
+    gcTime: 0,
+  });
+}
+
 export function issueTasksOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.tasks(issueId),

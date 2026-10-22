@@ -3854,6 +3854,37 @@ export class ApiClient {
     }
   }
 
+  async askIssueSideQuestion(issueId: string, content: string, workspaceSlug: string): Promise<ChatSideQuestion> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/side-question`, {
+      method: "POST",
+      headers: workspaceHeader(workspaceSlug),
+      body: JSON.stringify({ content }),
+    });
+    const response = parseWithFallback<ChatSideQuestion | null>(raw, ChatSideQuestionSchema, null, {
+      endpoint: "POST /api/issues/:id/side-question",
+    });
+    if (!response) throw new Error("invalid side question response");
+    return response;
+  }
+
+  async getIssueSideQuestion(issueId: string, requestId: string, workspaceSlug: string): Promise<ChatSideQuestion> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/side-question/${requestId}`, {
+      headers: workspaceHeader(workspaceSlug),
+    });
+    const response = parseWithFallback<ChatSideQuestion | null>(raw, ChatSideQuestionSchema, null, {
+      endpoint: "GET /api/issues/:id/side-question/:requestId",
+    });
+    if (!response || response.id !== requestId) throw new Error("invalid side question response");
+    return response;
+  }
+
+  async cancelIssueSideQuestion(issueId: string, requestId: string, workspaceSlug: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/side-question/${requestId}`, {
+      method: "DELETE",
+      headers: workspaceHeader(workspaceSlug),
+    });
+  }
+
   async askChatSideQuestion(sessionId: string, content: string, workspaceSlug: string): Promise<ChatSideQuestion> {
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/side-question`, {
       method: "POST",

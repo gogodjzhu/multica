@@ -2346,7 +2346,7 @@ func (s *TaskService) sendDirectChatMessage(
 	attachmentIDs []pgtype.UUID,
 	uploaderType string,
 	uploaderID pgtype.UUID,
-	source *db.ChatSession,
+	createSession func(context.Context, *db.Queries) (db.ChatSession, error),
 ) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -2366,8 +2366,8 @@ func (s *TaskService) sendDirectChatMessage(
 
 	var out DirectChatSendResult
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		if source != nil {
-			created, err := s.createSideQuestionSessionTx(ctx, qtx, *source, session.ID, initiatorUserID)
+		if createSession != nil {
+			created, err := createSession(ctx, qtx)
 			if err != nil {
 				return err
 			}

@@ -4,6 +4,8 @@
     "question": "问题",
     "character_count": "{{count}} / {{max}}",
     "placeholder": "询问当前对话中的内容…",
+    "issue_placeholder": "询问当前任务中的内容…",
+    "assignee_required": "旁路提问需要将任务负责人设为智能体或小队。",
     "notice": "顺便问一句,不影响主线会话",
     "ask": "提问",
     "retry": "重试",
@@ -11,13 +13,13 @@
     "close": "关闭并取消",
     "pending": "排队中…",
     "running": "回答中…",
-    "busy": "当前对话或运行环境已有旁路提问，请等待其结束。",
+    "busy": "已有旁路提问正在进行，请等待其结束。",
     "unavailable": "智能体暂不可用。请检查运行环境和使用权限后重试。",
     "failed": "未能获取回答，请重试。",
     "timeout": "旁路提问已超时，请重试。",
     "cancelled": "旁路提问已取消。",
     "status_error": "无法获取结果，请刷新状态。",
-    "cancel_error": "无法确认是否已取消。本次运行将在 10 分钟内自动过期。"
+    "cancel_error": "无法确认是否已取消。本次执行将在 10 分钟内自动过期。"
   },
   "page": {
     "title": "聊天",

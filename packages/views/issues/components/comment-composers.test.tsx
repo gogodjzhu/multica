@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import type { Attachment } from "@multica/core/types";
+import type { Attachment, IssueAssigneeType } from "@multica/core/types";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -27,6 +28,11 @@ const apiRenderQuickAction = vi.hoisted(() => vi.fn());
 const apiPreviewCommentTriggers = vi.hoisted(() => vi.fn());
 const apiListTasksByIssue = vi.hoisted(() => vi.fn());
 const apiCancelTask = vi.hoisted(() => vi.fn());
+const issueSideApi = vi.hoisted(() => ({
+  askIssueSideQuestion: vi.fn(),
+  getIssueSideQuestion: vi.fn(),
+  cancelIssueSideQuestion: vi.fn(),
+}));
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
@@ -65,6 +71,7 @@ vi.mock("@multica/core/api", () => ({
     previewCommentTriggers: apiPreviewCommentTriggers,
     listTasksByIssue: apiListTasksByIssue,
     cancelTask: apiCancelTask,
+    ...issueSideApi,
   },
 }));
 
@@ -117,6 +124,7 @@ vi.mock("../../editor", async () => ({
       value,
       onUpdate,
       placeholder,
+      ariaLabel,
       onUploadFile,
       onUploadingChange,
       onSubmit,
@@ -127,6 +135,7 @@ vi.mock("../../editor", async () => ({
       value?: string;
       onUpdate?: (markdown: string) => void;
       placeholder?: string;
+      ariaLabel?: string;
       onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
       onUploadingChange?: (uploading: boolean) => void;
       onSubmit?: () => void;
@@ -207,7 +216,8 @@ vi.mock("../../editor", async () => ({
 
     return (
       <textarea
-        data-testid="editor"
+        data-testid={ariaLabel ? "side-question-editor" : "editor"}
+        aria-label={ariaLabel}
         value={editorValue}
         placeholder={placeholder}
         onChange={(event) => {
@@ -297,6 +307,9 @@ beforeEach(() => {
   apiPreviewCommentTriggers.mockReset();
   apiListTasksByIssue.mockReset();
   apiCancelTask.mockReset();
+  issueSideApi.askIssueSideQuestion.mockReset().mockResolvedValue({ id: "side-run", status: "pending" });
+  issueSideApi.getIssueSideQuestion.mockReset().mockResolvedValue({ id: "side-run", status: "pending" });
+  issueSideApi.cancelIssueSideQuestion.mockReset().mockResolvedValue(undefined);
   insertMarkdownSpy.mockReset();
   insertPlaceholderSpy.mockReset();
   insertMarkdownBehavior.succeed = true;
@@ -313,6 +326,96 @@ beforeEach(() => {
   editorQuickActionMenu.last = undefined;
   focusCalls.focused = 0;
   focusCalls.blurred = 0;
+});
+
+describe("issue side questions", () => {
+  function renderSideQuestionComposer(onSubmit = vi.fn().mockResolvedValue(true), assigneeType: IssueAssigneeType = "agent") {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    queryClient.setQueryData(workspaceKeys.list(), [{ id: "ws-1", slug: "acme", name: "Acme" }]);
+    function Composer() {
+      const [issueId, setIssueId] = useState("issue-1");
+      return <>
+        <button onClick={() => setIssueId("issue-2")}>Switch issue</button>
+        <CommentInput key={issueId} issueId={issueId} sideQuestionAssignee={{ assignee_type: assigneeType, assignee_id: "assigned-assignee" }} onSubmit={onSubmit} />
+      </>;
+    }
+    const view = renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <WorkspaceSlugProvider slug="acme"><Composer /></WorkspaceSlugProvider>
+      </QueryClientProvider>,
+    );
+    return { ...view, onSubmit };
+  }
+
+  it("opens from the lazy composer and submits without posting a comment or stopping a run", async () => {
+    const { onSubmit } = renderSideQuestionComposer();
+    fireEvent.click(screen.getByRole("button", { name: "Side question" }));
+    expect(screen.getByTestId("comment-composer-shell")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "What is happening?" } });
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Question" }), { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(issueSideApi.askIssueSideQuestion).toHaveBeenCalledWith("issue-1", "What is happening?", "acme"));
+    await waitFor(() => expect(issueSideApi.getIssueSideQuestion).toHaveBeenCalledWith("issue-1", "side-run", "acme"));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(apiCancelTask).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Close and cancel" }), { key: "Escape" });
+    await waitFor(() => expect(issueSideApi.cancelIssueSideQuestion).toHaveBeenCalledWith("issue-1", "side-run", "acme"));
+    expect(screen.queryByRole("region", { name: "Side question" })).not.toBeInTheDocument();
+    expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBeUndefined();
+  });
+
+  it("copies the live comment draft, renders Markdown and preserves the draft", async () => {
+    useCommentDraftStore.getState().setDraft("new:issue-1", "Keep this comment");
+    issueSideApi.getIssueSideQuestion.mockResolvedValue({ id: "side-run", status: "completed", answer: "# Saved progress\n\nThe build is **running**." });
+    const { onSubmit } = renderSideQuestionComposer();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "Latest comment draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Side question" }));
+    expect(screen.getByRole("textbox", { name: "Question" })).toHaveValue("Latest comment draft");
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await screen.findByRole("heading", { name: "Saved progress" });
+    expect(screen.getByText("running").tagName).toBe("STRONG");
+    expect(screen.getByTestId("editor")).toHaveValue("Latest comment draft");
+    expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe("Latest comment draft");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("cancels a late creation against the original issue after switching issues", async () => {
+    let resolve!: (value: { id: string; status: string }) => void;
+    issueSideApi.askIssueSideQuestion.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    useCommentDraftStore.getState().setDraft("new:issue-1", "Original draft");
+    useCommentDraftStore.getState().setDraft("new:issue-2", "Other draft");
+    renderSideQuestionComposer();
+    fireEvent.click(screen.getByRole("button", { name: "Side question" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(issueSideApi.askIssueSideQuestion).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Switch issue" }));
+    await act(async () => resolve({ id: "late-side-run", status: "pending" }));
+    await waitFor(() => expect(issueSideApi.cancelIssueSideQuestion).toHaveBeenCalledWith("issue-1", "late-side-run", "acme"));
+    expect(issueSideApi.getIssueSideQuestion).not.toHaveBeenCalled();
+    expect(screen.queryByRole("region", { name: "Side question" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("editor")).toHaveValue("Other draft");
+    expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe("Original draft");
+  });
+
+  it("shows a disabled placeholder explaining the assignee requirement", async () => {
+    renderCommentInput();
+    const button = screen.getByRole("button", { name: "Side question" });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.queryByRole("region", { name: "Side question" })).not.toBeInTheDocument();
+    expect(issueSideApi.askIssueSideQuestion).not.toHaveBeenCalled();
+    act(() => button.parentElement!.focus());
+    expect(await screen.findByText("Assign this issue to an agent or squad to ask a side question.")).toBeVisible();
+  });
+
+  it("allows side questions for a squad assignee", async () => {
+    renderSideQuestionComposer(undefined, "squad");
+    const button = screen.getByRole("button", { name: "Side question" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    fireEvent.change(screen.getByRole("textbox", { name: "Question" }), { target: { value: "What has the squad learned?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(issueSideApi.askIssueSideQuestion).toHaveBeenCalledWith("issue-1", "What has the squad learned?", "acme"));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -416,7 +519,8 @@ describe("comment composers", () => {
     activateComposer("comment-composer-shell");
     expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
-    expect(container.querySelectorAll("button")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Side question" })).toBeDisabled();
+    expect(container.querySelectorAll("button")).toHaveLength(3);
 
     const shell = screen.getByTestId("drop-zone");
     expect(shell.className).not.toMatch(/max-h-/);

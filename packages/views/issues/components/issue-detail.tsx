@@ -3865,6 +3865,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <CommentInput
               key={id}
               issueId={id}
+              sideQuestionAssignee={issue}
               onSubmit={submitComment}
               onAccepted={scrollToTimelineBottom}
               onEditAnnotation={(annotationId) => descriptionAnnotations.editAnnotation(annotationId, true)}
